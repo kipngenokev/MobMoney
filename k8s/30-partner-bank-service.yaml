@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: partner-bank-service
+  namespace: mobmoney
+  labels:
+    app: partner-bank-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: partner-bank-service
+  template:
+    metadata:
+      labels:
+        app: partner-bank-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/actuator/prometheus"
+        prometheus.io/port: "8081"
+    spec:
+      containers:
+        - name: partner-bank-service
+          image: mobmoney/partner-bank-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8081
+          env:
+            - name: SERVER_PORT
+              value: "8081"
+            - name: PARTNER_TRANSIENT_FAULT_PROBABILITY
+              value: "0.1"
+            - name: PARTNER_REJECT_ABOVE
+              value: "1000000"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            initialDelaySeconds: 25
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            initialDelaySeconds: 40
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "100m", memory: "384Mi" }
+            limits: { cpu: "500m", memory: "640Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: partner-bank-service
+  namespace: mobmoney
+spec:
+  selector:
+    app: partner-bank-service
+  ports:
+    - port: 8081
+      targetPort: 8081

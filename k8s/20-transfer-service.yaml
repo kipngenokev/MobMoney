@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: transfer-service-config
+  namespace: mobmoney
+data:
+  DB_URL: "jdbc:mysql://mysql:3306/mobmoney?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+  PARTNER_BANK_URL: "http://partner-bank-service:8081"
+  CORS_ALLOWED_ORIGINS: "http://localhost:3000"
+  SERVER_PORT: "8080"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transfer-service
+  namespace: mobmoney
+  labels:
+    app: transfer-service
+spec:
+  replicas: 2 # stateless; idempotency + DB locks make horizontal scaling safe
+  selector:
+    matchLabels:
+      app: transfer-service
+  template:
+    metadata:
+      labels:
+        app: transfer-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/actuator/prometheus"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - name: transfer-service
+          image: mobmoney/transfer-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: transfer-service-config
+          env:
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: MYSQL_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: MYSQL_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 45
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "200m", memory: "512Mi" }
+            limits: { cpu: "1", memory: "768Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transfer-service
+  namespace: mobmoney
+  labels:
+    app: transfer-service
+spec:
+  selector:
+    app: transfer-service
+  ports:
+    - port: 8080
+      targetPort: 8080

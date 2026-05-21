@@ -1,0 +1,89 @@
+# Full local stack: MySQL, both backend services, the frontend, and
+# Prometheus + Grafana. `docker compose up --build` brings the whole system up.
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: mobmoney
+      MYSQL_USER: mobmoney
+      MYSQL_PASSWORD: mobmoney
+      MYSQL_ROOT_PASSWORD: rootpassword
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpassword"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  partner-bank-service:
+    build: ./backend/partner-bank-service
+    environment:
+      SERVER_PORT: 8081
+      # Demo failure injection so the transfer service's retry/saga logic is observable.
+      PARTNER_TRANSIENT_FAULT_PROBABILITY: "0.1"
+      PARTNER_REJECT_ABOVE: "1000000"
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  transfer-service:
+    build: ./backend/transfer-service
+    depends_on:
+      mysql:
+        condition: service_healthy
+      partner-bank-service:
+        condition: service_started
+    environment:
+      SERVER_PORT: 8080
+      DB_URL: jdbc:mysql://mysql:3306/mobmoney?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USERNAME: mobmoney
+      DB_PASSWORD: mobmoney
+      PARTNER_BANK_URL: http://partner-bank-service:8081
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - transfer-service
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+    ports:
+      - "3000:3000"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  mysql-data:

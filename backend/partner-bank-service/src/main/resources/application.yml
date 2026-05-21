@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: partner-bank-service
+
+server:
+  port: ${SERVER_PORT:8081}
+
+camel:
+  springboot:
+    name: partner-bank-camel
+    # Surface route/exchange metrics to Micrometer -> Prometheus.
+    main-run-controller: true
+
+partner:
+  # Settlements above this amount are deterministically REJECTED (-> HTTP 422).
+  reject-above: ${PARTNER_REJECT_ABOVE:1000000}
+  # Probability [0..1] of injecting a transient 500 to exercise client retries.
+  transient-fault-probability: ${PARTNER_TRANSIENT_FAULT_PROBABILITY:0.0}
+  # Upper bound for simulated processing latency, milliseconds.
+  max-latency-ms: ${PARTNER_MAX_LATENCY_MS:150}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: partner-bank-service
+
+logging:
+  level:
+    com.mobmoney.partner: INFO
+    org.apache.camel: INFO

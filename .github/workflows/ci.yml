@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  transfer-service:
+    name: transfer-service (unit + integration)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # GitHub-hosted runners ship a working Docker daemon, so Testcontainers
+      # spins up MySQL for the *IT integration tests with no extra config.
+      - name: Build, unit test, and integration test
+        working-directory: backend/transfer-service
+        run: mvn -B verify
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: transfer-service-test-reports
+          path: |
+            backend/transfer-service/target/surefire-reports
+            backend/transfer-service/target/failsafe-reports
+
+  partner-bank-service:
+    name: partner-bank-service (unit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Build and test
+        working-directory: backend/partner-bank-service
+        run: mvn -B verify
+
+  frontend:
+    name: frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  docker-images:
+    name: Build Docker images
+    runs-on: ubuntu-latest
+    # Only build images once tests have passed.
+    needs: [transfer-service, partner-bank-service, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build transfer-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend/transfer-service
+          push: false
+          tags: mobmoney/transfer-service:${{ github.sha }}
+      - name: Build partner-bank-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend/partner-bank-service
+          push: false
+          tags: mobmoney/partner-bank-service:${{ github.sha }}
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: false
+          tags: mobmoney/frontend:${{ github.sha }}
