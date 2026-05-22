@@ -7,7 +7,10 @@ import { Account, Transfer } from "@/types";
 /**
  * Transfer flow. A single Idempotency-Key is generated per "compose" session and
  * reused across retries of the SAME transfer, so a double-click or a network
- * retry can never move money twice. A new key is minted only after a success.
+ * retry can never move money twice. A new key is minted after a success AND
+ * whenever the payload changes — reusing a key with a different payload is what
+ * the backend rejects with "Idempotency-Key was already used with a different
+ * request payload", so any edit to the transfer must start a fresh key.
  */
 export function TransferForm({
   accounts,
@@ -32,6 +35,14 @@ export function TransferForm({
     () => accounts.find((a) => a.accountNumber === sourceAccountNumber),
     [accounts, sourceAccountNumber],
   );
+
+  // Editing the transfer means it's a different operation, so the current key no
+  // longer applies. Mint a new one on every field change; a resubmit without any
+  // edit (double-click / network retry) still reuses the same key safely.
+  function editPayload(apply: () => void) {
+    apply();
+    setIdempotencyKey(newIdempotencyKey());
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -70,7 +81,7 @@ export function TransferForm({
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             placeholder="ACC-BOB-001 or PARTNER-EXT-001"
             value={destination}
-            onChange={(e) => setDestination(e.target.value)}
+            onChange={(e) => editPayload(() => setDestination(e.target.value))}
             required
           />
         </div>
@@ -85,7 +96,7 @@ export function TransferForm({
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             placeholder="0.00"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(e) => editPayload(() => setAmount(e.target.value))}
             required
           />
         </div>
@@ -96,7 +107,7 @@ export function TransferForm({
             placeholder="What's it for?"
             maxLength={140}
             value={narrative}
-            onChange={(e) => setNarrative(e.target.value)}
+            onChange={(e) => editPayload(() => setNarrative(e.target.value))}
           />
         </div>
 

@@ -11,10 +11,14 @@ services:
     ports:
       - "3306:3306"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpassword"]
+      # Use 127.0.0.1 (not "localhost") so the check goes over TCP, not the Unix
+      # socket. The socket comes up during MySQL's data-dir init phase, which would
+      # otherwise report "healthy" before the server accepts TCP connections.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-prootpassword"]
       interval: 5s
       timeout: 3s
       retries: 20
+      start_period: 30s
     volumes:
       - mysql-data:/var/lib/mysql
 
